@@ -1,4 +1,6 @@
 pub mod kernel;
+pub mod optimizer;
+pub mod smo;
 pub mod svc;
 pub mod svm;
 
