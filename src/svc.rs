@@ -1,80 +1,98 @@
+#[cfg(feature = "parallel")]
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
 use crate::{kernel::Kernel, smo::SMO, svm::SVM};
 
 pub struct SVC {
-    pub kernel: Box<dyn Kernel>,
-    pub w: Option<Vec<f64>>,                    // weight vector
-    pub b: Option<f64>,                         // bias
-    pub support_vectors: Option<Vec<Vec<f64>>>, // support vectors
+    kernel: Box<dyn Kernel>,
+    alphas: Option<Vec<f64>>,
+    support_vectors: Option<Vec<Vec<f64>>>,
+    support_labels: Option<Vec<f64>>,
+    b: Option<f64>,
 }
+
+unsafe impl Sync for SVC {}
+unsafe impl Send for SVC {}
 
 impl SVC {
     pub fn new(kernel: Box<dyn Kernel>) -> SVC {
         SVC {
             kernel,
-            w: None,
-            b: None,
+            alphas: None,
             support_vectors: None,
+            support_labels: None,
+            b: None,
         }
     }
 
-    pub fn get_model_parameters(&self) -> (Option<Vec<f64>>, Option<f64>) {
-        (self.w.clone(), self.b)
+    fn predict_sample(
+        sample: &Vec<f64>,
+        alphas: &[f64],
+        labels: &[f64],
+        support_vectors: &[Vec<f64>],
+        b: f64,
+        kernel: &Box<dyn Kernel>,
+    ) -> i32 {
+        let mut sum = 0.0;
+        for ((&alpha, support_vector), &label) in alphas.iter().zip(support_vectors).zip(labels) {
+            sum += alpha * label * kernel.compute(sample, support_vector);
+        }
+
+        if sum + b > 0.0 {
+            1
+        } else {
+            -1
+        }
     }
 }
-
 impl SVM for SVC {
     fn fit(&mut self, x: &Vec<Vec<f64>>, y: &Vec<i32>) {
         if x.len() != y.len() {
             panic!("Number of samples in x does not match number of labels in y");
         }
 
-        // Initialize weights and bias
-        let mut weights = vec![0.0; x.len()];
-        let mut bias = 0.0;
+        let y_f64: Vec<f64> = y.iter().map(|&label| label as f64).collect();
 
-        // A very simplistic approach to adjust weights using the kernel
-        for (i, xi) in x.iter().enumerate() {
-            for (j, xj) in x.iter().enumerate() {
-                let label_i = y[i] as f64;
-                let label_j = y[j] as f64;
-                weights[i] += label_i * label_j * self.kernel.compute(xi, xj);
+        let smo = SMO::default();
+        let (alphas, b) = smo.run(x, &y_f64, &self.kernel);
+
+        let mut support_vectors = Vec::new();
+        let mut support_labels = Vec::new();
+
+        for (i, &alpha) in alphas.iter().enumerate() {
+            if alpha.abs() > 1e-5 {
+                support_vectors.push(x[i].clone());
+                support_labels.push(y_f64[i]);
             }
         }
 
-        // Bias calculation (also simplified)
-        bias = y.iter().map(|&label| label as f64).sum::<f64>() / y.len() as f64;
-
-        let smo = SMO::default();
-        let y = y.iter().map(|&label| label as f64).collect::<Vec<f64>>();
-        let (alphas, b) = smo.run(x, &y, &self.kernel);
-
-        self.w = Some(weights);
-        self.b = Some(bias);
-        self.support_vectors = Some(vec![alphas]);
+        self.alphas = Some(alphas);
+        self.support_vectors = Some(support_vectors);
+        self.support_labels = Some(support_labels);
+        self.b = Some(b);
     }
 
     fn predict(&self, x: &Vec<Vec<f64>>) -> Vec<i32> {
-        let instances = self
-            .support_vectors
-            .as_ref()
-            .expect("Model has not been trained yet.");
-        let w = self.w.as_ref().expect("Model has not been trained yet.");
-        let b = self.b.as_ref().expect("Model has not been trained yet.");
-        x.iter()
-            .map(|sample| {
-                let mut decision = 0.0;
-                for (support_vector, &weight) in instances.iter().zip(w.iter()) {
-                    decision += weight * self.kernel.compute(sample, support_vector);
-                }
-                decision += b;
+        let support_vectors = self.support_vectors.as_ref().expect("Model not trained");
+        let alphas = self.alphas.as_ref().expect("Model not trained");
+        let labels = self.support_labels.as_ref().expect("Model not trained");
+        let b = self.b.expect("Model not trained");
 
-                if decision > 0.0 {
-                    1
-                } else {
-                    -1
-                }
-            })
-            .collect()
+        #[cfg(feature = "parallel")]
+        {
+            x.par_iter()
+                .map(|sample| {
+                    Self::predict_sample(sample, alphas, labels, support_vectors, b, &self.kernel)
+                })
+                .collect()
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            x.iter()
+                .map(|sample| self.predict_sample(sample, alphas, labels, support_vectors, b))
+                .collect()
+        }
     }
 }
 

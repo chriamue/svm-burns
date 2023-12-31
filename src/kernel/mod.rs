@@ -21,7 +21,7 @@ impl KernelType {
     }
 }
 
-pub trait Kernel {
+pub trait Kernel: Sync + Send {
     fn compute(&self, x: &Vec<f64>, y: &Vec<f64>) -> f64;
 }
 

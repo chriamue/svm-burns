@@ -2,6 +2,8 @@
 // source: https://github.com/smartcorelib/smartcore/blob/development/src/svm/svc.rs
 
 use rand::Rng;
+#[cfg(feature = "parallel")]
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{kernel::KernelType, Kernel};
 
@@ -15,6 +17,9 @@ pub struct SMO {
     /// Kernel
     kernel: Box<dyn Kernel>,
 }
+
+unsafe impl Sync for SMO {}
+unsafe impl Send for SMO {}
 
 impl SMO {
     pub fn new(c: f64, tol: f64, max_passes: usize, kernel: Box<dyn Kernel>) -> Self {
@@ -62,11 +67,12 @@ impl SMO {
         alpha: &Vec<f64>,
         b: f64,
         x: &Vec<Vec<f64>>,
+        sample: &Vec<f64>,
         y: &Vec<f64>,
     ) -> f64 {
         let mut sum = 0.0;
         for i in 0..x.len() {
-            sum += alpha[i] * y[i] * kernel.compute(&x[i], &x[i]);
+            sum += alpha[i] * y[i] * kernel.compute(&x[i], sample);
         }
         sum + b
     }
@@ -107,9 +113,8 @@ impl SMO {
         x: &Vec<Vec<f64>>,
         y: &Vec<f64>,
     ) -> f64 {
-        let f_x_i = SMO::linear_classifier(kernel, alpha, b, x, y);
-        let e_i = f_x_i - y_i;
-        e_i
+        let decision = SMO::linear_classifier(kernel, alpha, b, x, x_i, y);
+        decision - y_i
     }
 
     fn clip_alpha_j(alpha_j: f64, l: f64, h: f64) -> f64 {
@@ -190,17 +195,32 @@ impl SMO {
         let mut alphas = vec![0.0; x.len()];
         let mut b = 0.0;
         let mut passes = 0;
-        let mut num_changed_alphas = 0;
+
+        // Precompute the errors in parallel
+        #[cfg(feature = "parallel")]
+        let errors: Vec<_> = x
+            .par_iter()
+            .zip(y.par_iter())
+            .map(|(x_i, &y_i)| SMO::calculate_error(kernel, x_i, y_i, b, &alphas, x, y))
+            .collect();
+
+        #[cfg(not(feature = "parallel"))]
+        let errors: Vec<_> = x
+            .iter()
+            .zip(y.iter())
+            .map(|(x_i, &y_i)| SMO::calculate_error(kernel, x_i, y_i, b, &alphas, x, y))
+            .collect();
 
         while passes < self.max_passes {
-            num_changed_alphas = 0;
+            let mut num_changed_alphas = 0;
             for i in 0..x.len() {
-                let e_i = SMO::calculate_error(&kernel, &x[i], y[i], b, &alphas, x, y);
+                let e_i = errors[i];
                 if (y[i] * e_i < -self.tol && alphas[i] < self.c)
                     || (y[i] * e_i > self.tol && alphas[i] > 0.0)
                 {
                     let j = SMO::rand_j(x.len(), i);
-                    let e_j = SMO::calculate_error(&kernel, &x[j], y[j], b, &alphas, x, y);
+                    let e_j = errors[j];
+
                     let alpha_i_old = alphas[i];
                     let alpha_j_old = alphas[j];
                     let (l, h) = if y[i] != y[j] {
@@ -214,46 +234,57 @@ impl SMO {
                             SMO::compute_H(alpha_i_old, alpha_j_old, y[i], y[j], self.c),
                         )
                     };
+
                     if l == h {
                         continue;
                     }
-                    let eta = SMO::calculate_eta(&kernel, &x[i], &x[j]);
+
+                    let eta = SMO::calculate_eta(kernel, &x[i], &x[j]);
                     if eta >= 0.0 {
                         continue;
                     }
-                    let alpha_j_new = SMO::calculate_alpha_j(alpha_j_old, y[j], e_i, e_j, eta);
-                    let alpha_j_new = SMO::clip_alpha_j(alpha_j_new, l, h);
-                    if (alpha_j_new - alpha_j_old).abs() < 1e-5 {
+
+                    alphas[j] = SMO::clip_alpha_j(
+                        SMO::calculate_alpha_j(alpha_j_old, y[j], e_i, e_j, eta),
+                        l,
+                        h,
+                    );
+
+                    if (alphas[j] - alpha_j_old).abs() < 1e-5 {
                         continue;
                     }
-                    let alpha_i_new =
-                        SMO::calculate_alpha_i(alpha_i_old, y[i], y[j], alpha_j_old, alpha_j_new);
+
+                    alphas[i] =
+                        SMO::calculate_alpha_i(alpha_i_old, y[i], y[j], alpha_j_old, alphas[j]);
+
                     let (b1, b2) = SMO::calculate_bs(
                         b,
                         &x[i],
                         y[i],
                         &x[j],
                         y[j],
-                        alpha_i_new,
-                        alpha_j_new,
+                        alphas[i],
+                        alphas[j],
                         e_i,
                         e_j,
                         alpha_i_old,
                         alpha_j_old,
-                        &kernel,
+                        kernel,
                     );
-                    b = SMO::compute_b(b1, b2, alpha_i_new, alpha_j_new, self.c);
-                    alphas[i] = alpha_i_new;
-                    alphas[j] = alpha_j_new;
+
+                    b = SMO::compute_b(b1, b2, alphas[i], alphas[j], self.c);
+
                     num_changed_alphas += 1;
                 }
             }
+
             if num_changed_alphas == 0 {
                 passes += 1;
             } else {
                 passes = 0;
             }
         }
+
         (alphas, b)
     }
 }
