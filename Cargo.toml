@@ -1,0 +1,19 @@
+[package]
+name = "svm-burns"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+
+[dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
+smartcore = { version = "0.3" }
+
+[[bench]]
+name = "rbf_benchmark"
+harness = false
+
+[[bench]]
+name = "linear_benchmark"
+harness = false
