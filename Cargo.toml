@@ -17,3 +17,7 @@ harness = false
 [[bench]]
 name = "linear_benchmark"
 harness = false
+
+[[bench]]
+name = "svm_benchmark"
+harness = false
