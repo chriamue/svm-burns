@@ -1,7 +1,17 @@
-use crate::{kernel, Kernel};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::{
+    kernel::{self, KernelType},
+    Kernel,
+};
+
+#[derive(Serialize, Deserialize)]
 pub struct Parameters {
     /// Kernel
+    #[serde(
+        serialize_with = "serialize_kernel",
+        deserialize_with = "deserialize_kernel"
+    )]
     pub kernel: Box<dyn Kernel>,
     /// regularization parameter
     pub c: f64,
@@ -9,6 +19,22 @@ pub struct Parameters {
     pub tol: f64,
     /// maximum number of iterations over Larange multipliers without changing
     pub epochs: usize,
+}
+
+fn serialize_kernel<S>(kernel: &Box<dyn Kernel>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let kernel_type = kernel.type_of();
+    kernel_type.serialize(serializer)
+}
+
+fn deserialize_kernel<'de, D>(deserializer: D) -> Result<Box<dyn Kernel>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let kernel_type = KernelType::deserialize(deserializer)?;
+    Ok(kernel_type.new())
 }
 
 impl Parameters {

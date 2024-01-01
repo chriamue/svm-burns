@@ -1,8 +1,10 @@
 #[cfg(feature = "parallel")]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
 
 use crate::{kernel::Kernel, optimizer::Optimizer, parameters::Parameters, smo::SMO, svm::SVM};
 
+#[derive(Serialize, Deserialize)]
 pub struct SVC {
     parameters: Parameters,
     alphas: Option<Vec<f64>>,

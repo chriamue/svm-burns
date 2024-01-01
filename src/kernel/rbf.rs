@@ -1,7 +1,10 @@
 use std::ops::Mul;
 
+use serde::{Deserialize, Serialize};
+
 use crate::Kernel;
 
+#[derive(Serialize, Deserialize)]
 pub struct RBFKernel {
     gamma: f64,
 }
@@ -31,6 +34,10 @@ impl Kernel for RBFKernel {
             .sum::<f64>()
             .mul(-self.gamma)
             .exp()
+    }
+
+    fn type_of(&self) -> super::KernelType {
+        super::KernelType::RBF(self.gamma)
     }
 }
 

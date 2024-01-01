@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::Kernel;
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct LinearKernel {}
 
 impl LinearKernel {
@@ -12,6 +14,10 @@ impl LinearKernel {
 impl Kernel for LinearKernel {
     fn compute(&self, x: &Vec<f64>, y: &Vec<f64>) -> f64 {
         x.iter().zip(y.iter()).map(|(&xi, &yi)| xi * yi).sum()
+    }
+
+    fn type_of(&self) -> super::KernelType {
+        super::KernelType::Linear
     }
 }
 

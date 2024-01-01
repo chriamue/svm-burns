@@ -5,10 +5,12 @@ pub mod rbf;
 
 pub use linear::LinearKernel;
 pub use rbf::RBFKernel;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 pub enum KernelType {
     Linear,
-    RBF,
+    RBF(f64),
 }
 
 impl KernelType {
@@ -19,10 +21,18 @@ impl KernelType {
     pub fn rbf() -> Box<dyn Kernel> {
         Box::new(RBFKernel::default())
     }
+
+    pub fn new(&self) -> Box<dyn Kernel> {
+        match self {
+            KernelType::Linear => KernelType::linear(),
+            KernelType::RBF(gamma) => Box::new(RBFKernel::new(*gamma)),
+        }
+    }
 }
 
 pub trait Kernel: Sync + Send {
     fn compute(&self, x: &Vec<f64>, y: &Vec<f64>) -> f64;
+    fn type_of(&self) -> KernelType;
 }
 
 #[cfg(test)]
