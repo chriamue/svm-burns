@@ -32,7 +32,9 @@ fn svm_burns_benchmark(c: &mut Criterion) {
     ];
 
     let rbf_kernel = BurnsRBFKernel::new(1.0);
-    let mut svc = BurnsSVC::new(Box::new(rbf_kernel));
+    let mut parameters = svm_burns::Parameters::default();
+    parameters.with_kernel(Box::new(rbf_kernel));
+    let mut svc = BurnsSVC::new(parameters);
 
     c.bench_function("svm_burns", |b| {
         b.iter(|| {

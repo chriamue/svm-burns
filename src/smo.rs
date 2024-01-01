@@ -5,7 +5,10 @@ use rand::Rng;
 #[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use crate::{kernel::KernelType, Kernel};
+use crate::{
+    optimizer::{AlphasB, Optimizer},
+    Kernel,
+};
 
 pub struct SMO {
     /// regularization parameter
@@ -13,31 +16,19 @@ pub struct SMO {
     /// numerical tolerance
     tol: f64,
     /// maximum number of iterations over Larange multipliers without changing
-    max_passes: usize,
-    /// Kernel
-    kernel: Box<dyn Kernel>,
+    epochs: usize,
 }
 
 unsafe impl Sync for SMO {}
 unsafe impl Send for SMO {}
 
 impl SMO {
-    pub fn new(c: f64, tol: f64, max_passes: usize, kernel: Box<dyn Kernel>) -> Self {
-        SMO {
-            c,
-            tol,
-            max_passes,
-            kernel,
-        }
+    pub fn new(c: f64, tol: f64, epochs: usize) -> Self {
+        SMO { c, tol, epochs }
     }
 }
 
 impl SMO {
-    pub fn with_kernel(&mut self, kernel: Box<dyn Kernel>) -> &mut Self {
-        self.kernel = kernel;
-        self
-    }
-
     pub fn with_c(&mut self, c: f64) -> &mut Self {
         self.c = c;
         self
@@ -48,16 +39,15 @@ impl SMO {
         self
     }
 
-    pub fn with_max_passes(&mut self, max_passes: usize) -> &mut Self {
-        self.max_passes = max_passes;
+    pub fn with_epochs(&mut self, epochs: usize) -> &mut Self {
+        self.epochs = epochs;
         self
     }
 }
 
 impl Default for SMO {
     fn default() -> Self {
-        let kernel = KernelType::linear();
-        SMO::new(1.0, 1e-3, 5, kernel)
+        SMO::new(1.0, 1e-3, 5)
     }
 }
 
@@ -185,13 +175,8 @@ impl SMO {
     }
 }
 
-impl SMO {
-    pub fn run(
-        &self,
-        x: &Vec<Vec<f64>>,
-        y: &Vec<f64>,
-        kernel: &Box<dyn Kernel>,
-    ) -> (Vec<f64>, f64) {
+impl Optimizer for SMO {
+    fn optimize(&self, x: &Vec<Vec<f64>>, y: &Vec<f64>, kernel: &Box<dyn Kernel>) -> AlphasB {
         let mut alphas = vec![0.0; x.len()];
         let mut b = 0.0;
         let mut passes = 0;
@@ -211,7 +196,7 @@ impl SMO {
             .map(|(x_i, &y_i)| SMO::calculate_error(kernel, x_i, y_i, b, &alphas, x, y))
             .collect();
 
-        while passes < self.max_passes {
+        while passes < self.epochs {
             let mut num_changed_alphas = 0;
             for i in 0..x.len() {
                 let e_i = errors[i];

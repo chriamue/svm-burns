@@ -1,10 +1,10 @@
 #[cfg(feature = "parallel")]
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::{kernel::Kernel, smo::SMO, svm::SVM};
+use crate::{kernel::Kernel, optimizer::Optimizer, parameters::Parameters, smo::SMO, svm::SVM};
 
 pub struct SVC {
-    kernel: Box<dyn Kernel>,
+    parameters: Parameters,
     alphas: Option<Vec<f64>>,
     support_vectors: Option<Vec<Vec<f64>>>,
     support_labels: Option<Vec<f64>>,
@@ -15,9 +15,9 @@ unsafe impl Sync for SVC {}
 unsafe impl Send for SVC {}
 
 impl SVC {
-    pub fn new(kernel: Box<dyn Kernel>) -> SVC {
+    pub fn new(parameters: Parameters) -> SVC {
         SVC {
-            kernel,
+            parameters,
             alphas: None,
             support_vectors: None,
             support_labels: None,
@@ -53,8 +53,12 @@ impl SVM for SVC {
 
         let y_f64: Vec<f64> = y.iter().map(|&label| label as f64).collect();
 
-        let smo = SMO::default();
-        let (alphas, b) = smo.run(x, &y_f64, &self.kernel);
+        let smo = SMO::new(
+            self.parameters.c,
+            self.parameters.tol,
+            self.parameters.epochs,
+        );
+        let (alphas, b) = smo.optimize(x, &y_f64, &self.parameters.kernel);
 
         let mut support_vectors = Vec::new();
         let mut support_labels = Vec::new();
@@ -82,7 +86,14 @@ impl SVM for SVC {
         {
             x.par_iter()
                 .map(|sample| {
-                    Self::predict_sample(sample, alphas, labels, support_vectors, b, &self.kernel)
+                    Self::predict_sample(
+                        sample,
+                        alphas,
+                        labels,
+                        support_vectors,
+                        b,
+                        &self.parameters.kernel,
+                    )
                 })
                 .collect()
         }
@@ -103,8 +114,9 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let rbf = KernelType::rbf();
-        let mut svc = SVC::new(rbf);
+        let mut parameters = Parameters::default();
+        parameters.with_kernel(KernelType::linear());
+        let mut svc = SVC::new(parameters);
 
         let x = vec![vec![1.0], vec![2.0], vec![3.0]];
         let y = vec![-1, -1, 1];
@@ -144,9 +156,9 @@ mod tests {
             -1, -1, -1, -1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         ];
 
-        let rbf_kernel = RBFKernel::new(0.7);
-
-        let mut svc = SVC::new(Box::new(rbf_kernel));
+        let mut parameters = Parameters::default();
+        parameters.with_kernel(Box::new(RBFKernel::new(0.7)));
+        let mut svc = SVC::new(parameters);
 
         svc.fit(&x, &y);
 
@@ -193,9 +205,12 @@ mod tests {
             -1, -1, -1, -1, -1, -1, -1, -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         ];
 
-        let rbf_kernel = LinearKernel::default();
+        let linear_kernel = LinearKernel::default();
 
-        let mut svc = SVC::new(Box::new(rbf_kernel));
+        let mut parameters = Parameters::default();
+        parameters.with_kernel(Box::new(linear_kernel));
+
+        let mut svc = SVC::new(parameters);
 
         svc.fit(&x, &y);
 
