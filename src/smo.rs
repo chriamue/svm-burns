@@ -6,6 +6,7 @@ use rand::Rng;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
+    cache::Cache,
     optimizer::{AlphasB, Optimizer},
     Kernel,
 };
@@ -17,6 +18,8 @@ pub struct SMO {
     tol: f64,
     /// maximum number of iterations over Larange multipliers without changing
     epochs: usize,
+
+    cache: Cache,
 }
 
 unsafe impl Sync for SMO {}
@@ -24,7 +27,12 @@ unsafe impl Send for SMO {}
 
 impl SMO {
     pub fn new(c: f64, tol: f64, epochs: usize) -> Self {
-        SMO { c, tol, epochs }
+        SMO {
+            c,
+            tol,
+            epochs,
+            cache: Cache::new(),
+        }
     }
 }
 
@@ -172,6 +180,12 @@ impl SMO {
             j = rand::thread_rng().gen_range(0..m);
         }
         j
+    }
+}
+
+impl SMO {
+    fn initialize(&mut self) {
+        self.cache.clear();
     }
 }
 

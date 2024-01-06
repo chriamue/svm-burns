@@ -2,7 +2,9 @@
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
-use crate::{kernel::Kernel, optimizer::Optimizer, parameters::Parameters, smo::SMO, svm::SVM};
+use crate::{
+    kernel::Kernel, optimizer::Optimizer, parameters::Parameters, smo::SMO, svm::SVM, B, W,
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct SVC {
@@ -10,7 +12,8 @@ pub struct SVC {
     alphas: Option<Vec<f64>>,
     support_vectors: Option<Vec<Vec<f64>>>,
     support_labels: Option<Vec<f64>>,
-    b: Option<f64>,
+    w: Option<W>,
+    b: Option<B>,
 }
 
 unsafe impl Sync for SVC {}
@@ -23,28 +26,35 @@ impl SVC {
             alphas: None,
             support_vectors: None,
             support_labels: None,
+            w: None,
             b: None,
         }
     }
 
-    fn predict_sample(
-        sample: &Vec<f64>,
-        alphas: &[f64],
-        labels: &[f64],
+    pub fn predict_row(
+        x_i: &Vec<f64>,
+        w: &[f64],
         support_vectors: &[Vec<f64>],
         b: f64,
         kernel: &Box<dyn Kernel>,
-    ) -> i32 {
-        let mut sum = 0.0;
-        for ((&alpha, support_vector), &label) in alphas.iter().zip(support_vectors).zip(labels) {
-            sum += alpha * label * kernel.compute(sample, support_vector);
+    ) -> f64 {
+        let mut sum = b;
+        for (w_i, support_vector) in w.iter().zip(support_vectors) {
+            sum += w_i * kernel.compute(x_i, support_vector);
         }
+        sum
+    }
 
-        if sum + b > 0.0 {
-            1
-        } else {
-            -1
-        }
+    pub fn decision_function(&self, x: &Vec<Vec<f64>>) -> Vec<f64> {
+        let support_vectors = self.support_vectors.as_ref().expect("Model not trained");
+        let w = self.w.as_ref().expect("Model not trained");
+        let b = self.b.expect("Model not trained");
+
+        let y: Vec<f64> = x
+            .iter()
+            .map(|sample| Self::predict_row(sample, w, support_vectors, b, &self.parameters.kernel))
+            .collect();
+        y
     }
 }
 impl SVM for SVC {
@@ -72,47 +82,29 @@ impl SVM for SVC {
             }
         }
 
-        self.alphas = Some(alphas);
+        self.w = Some(alphas);
         self.support_vectors = Some(support_vectors);
         self.support_labels = Some(support_labels);
         self.b = Some(b);
     }
 
     fn predict(&self, x: &Vec<Vec<f64>>) -> Vec<i32> {
-        let support_vectors = self.support_vectors.as_ref().expect("Model not trained");
-        let alphas = self.alphas.as_ref().expect("Model not trained");
-        let labels = self.support_labels.as_ref().expect("Model not trained");
-        let b = self.b.expect("Model not trained");
-
-        #[cfg(feature = "parallel")]
-        {
-            x.par_iter()
-                .map(|sample| {
-                    Self::predict_sample(
-                        sample,
-                        alphas,
-                        labels,
-                        support_vectors,
-                        b,
-                        &self.parameters.kernel,
-                    )
-                })
-                .collect()
-        }
-
-        #[cfg(not(feature = "parallel"))]
-        {
-            x.iter()
-                .map(|sample| self.predict_sample(sample, alphas, labels, support_vectors, b))
-                .collect()
-        }
+        let y_hat = self.decision_function(x);
+        y_hat.iter()
+            .map(|&y| if y > 0.0 { 1 } else { -1 })
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use rayon::{result, vec};
+
     use super::*;
-    use crate::kernel::{KernelType, LinearKernel, RBFKernel};
+    use crate::{
+        kernel::{KernelType, LinearKernel, RBFKernel},
+        parameters, support_vector,
+    };
 
     #[test]
     fn it_works() {
@@ -229,5 +221,75 @@ mod tests {
             accuracy >= 0.9,
             "Accuracy ({accuracy}) is not larger or equal to 0.9"
         );
+    }
+
+    #[test]
+    fn test_predict_w_b() {
+        let x = vec![vec![1.0, 1.0], vec![2.0, 2.0], vec![3.0, 3.0]];
+        let y: Vec<i32> = vec![-1, -1, 1];
+        let support_vectors = vec![vec![1.0, 1.0], vec![2.0, 2.0]];
+
+        let w = vec![1.0];
+        let b = 0.0;
+
+        let kernel: Box<dyn Kernel> = Box::new(LinearKernel::default());
+
+        let result = SVC::predict_row(&x[0], &w, &support_vectors, b, &kernel);
+        assert_eq!(result, 2.0);
+
+        let result = SVC::predict_row(&x[1], &w, &support_vectors, b, &kernel);
+        assert_eq!(result, 4.0);
+    }
+
+    #[test]
+    fn test_decision_function() {
+        let x = vec![vec![1.0, 1.0], vec![2.0, 2.0], vec![3.0, 3.0]];
+        let support_vectors = vec![vec![1.0, 1.0], vec![2.0, 2.0]];
+
+        let w = vec![1.0];
+        let b = 0.0;
+
+        let kernel: Box<dyn Kernel> = Box::new(LinearKernel::default());
+
+        let mut parameters = Parameters::default();
+        parameters.with_kernel(kernel);
+
+        let svc = SVC {
+            parameters,
+            alphas: None,
+            support_vectors: Some(support_vectors),
+            support_labels: None,
+            w: Some(w),
+            b: Some(b),
+        };
+
+        let result = svc.decision_function(&x);
+        assert_eq!(result, vec![2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn test_predict() {
+        let x = vec![vec![1.0, 1.0], vec![2.0, 2.0], vec![3.0, 3.0]];
+        let support_vectors = vec![vec![1.0, 1.0], vec![2.0, 2.0]];
+
+        let w = vec![1.0];
+        let b = 0.0;
+
+        let kernel: Box<dyn Kernel> = Box::new(LinearKernel::default());
+
+        let mut parameters = Parameters::default();
+        parameters.with_kernel(kernel);
+
+        let svc = SVC {
+            parameters,
+            alphas: None,
+            support_vectors: Some(support_vectors),
+            support_labels: None,
+            w: Some(w),
+            b: Some(b),
+        };
+
+        let result = svc.predict(&x);
+        assert_eq!(result, vec![1, 1, 1]);
     }
 }
