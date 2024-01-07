@@ -55,7 +55,7 @@ impl Default for Parameters {
             kernel: Box::new(kernel),
             c: 1.0,
             tol: 1e-3,
-            epochs: 5,
+            epochs: 2,
         }
     }
 }
@@ -91,7 +91,7 @@ mod tests {
         let mut params = Parameters::default();
         assert_eq!(params.c, 1.0);
         assert_eq!(params.tol, 1e-3);
-        assert_eq!(params.epochs, 5);
+        assert_eq!(params.epochs, 2);
 
         params.with_c(2.0).with_tol(2e-3).with_max_passes(10);
         assert_eq!(params.c, 2.0);

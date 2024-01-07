@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+#[derive(Debug)]
 pub struct Cache {
     data: HashMap<(usize, usize), f64>,
 }
@@ -11,7 +12,7 @@ impl Cache {
         }
     }
 
-    pub fn get(&self, i: usize, j: usize) -> Option<&f64> {
+    fn get(&self, i: usize, j: usize) -> Option<&f64> {
         self.data.get(&(i, j))
     }
 
@@ -19,12 +20,12 @@ impl Cache {
         self.data.insert(key, value);
     }
 
-    pub fn clear(&mut self) {
-        self.data.clear();
-    }
-
     pub fn get_or_insert(&mut self, key: (usize, usize), value: f64) -> &f64 {
         self.data.entry(key).or_insert(value)
+    }
+
+    pub fn drop_all(&mut self, idxs: HashSet<usize>) {
+        self.data.retain(|k, _| !idxs.contains(&k.0));
     }
 }
 

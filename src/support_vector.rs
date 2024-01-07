@@ -2,22 +2,24 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SupportVector {
-    pub alpha: f64,
+    pub index: usize,
     pub x: Vec<f64>,
+    pub alpha: f64,
     pub grad: f64,
-    pub k: f64,
     pub cmin: f64,
     pub cmax: f64,
+    pub k: f64,
 }
 
 impl SupportVector {
-    pub fn new(alpha: f64, x: Vec<f64>, y: f64, grad: f64, c: f64, k: f64) -> SupportVector {
-        let (cmin, cmax) = if y > 0.0 { (c, 0.0) } else { (0.0, c) };
+    pub fn new(index: usize, x: Vec<f64>, y: f64, grad: f64, c: f64, k: f64) -> SupportVector {
+        let (cmin, cmax) = if y > 0.0 { (0.0, c) } else { (-c, 0.0) };
         SupportVector {
-            alpha,
+            index,
             x,
             grad,
             k,
+            alpha: 0.0,
             cmin,
             cmax,
         }
@@ -37,20 +39,18 @@ mod tests {
 
     #[test]
     fn new_support_vector() {
-        let alpha = 0.5;
         let x = vec![1.0, 2.0, 3.0];
         let y = 1.0;
         let grad = 0.1;
         let c = 1.0;
         let k = 0.5;
 
-        let sv = SupportVector::new(alpha, x.clone(), y, grad, c, k);
+        let sv = SupportVector::new(0, x.clone(), y, grad, c, k);
 
-        assert_eq!(alpha, sv.alpha);
         assert_eq!(x, sv.x);
         assert_eq!(grad, sv.grad);
         assert_eq!(k, sv.k);
-        assert_eq!(c, sv.cmin);
-        assert_eq!(0.0, sv.cmax);
+        assert_eq!(0.0, sv.cmin);
+        assert_eq!(1.0, sv.cmax);
     }
 }

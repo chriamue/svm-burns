@@ -9,7 +9,7 @@ pub mod cache;
 pub mod kernel;
 pub mod optimizer;
 pub mod parameters;
-pub mod smo;
+pub mod smartcore_optimizer;
 pub mod support_vector;
 pub mod svc;
 pub mod svm;
