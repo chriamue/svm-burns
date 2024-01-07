@@ -1,5 +1,5 @@
 #[cfg(feature = "parallel")]
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -39,11 +39,20 @@ impl SVC {
         b: f64,
         kernel: &Box<dyn Kernel>,
     ) -> f64 {
-        let mut sum = b;
-        for (w_i, support_vector) in w.iter().zip(support_vectors) {
-            sum += w_i * kernel.compute(x_i, support_vector);
-        }
-        sum
+        #[cfg(feature = "parallel")]
+        let sum: f64 = w
+            .par_iter()
+            .zip(support_vectors.par_iter())
+            .map(|(w_i, support_vector)| w_i * kernel.compute(x_i, support_vector))
+            .sum();
+
+        #[cfg(not(feature = "parallel"))]
+        let sum: f64 = w
+            .iter()
+            .zip(support_vectors.iter())
+            .map(|(w_i, support_vector)| w_i * kernel.compute(x_i, support_vector))
+            .sum();
+        sum + b
     }
 
     pub fn decision_function(&self, x: &Vec<Vec<f64>>) -> Vec<f64> {
@@ -51,6 +60,12 @@ impl SVC {
         let w = self.w.as_ref().expect("Model not trained");
         let b = self.b.expect("Model not trained");
 
+        #[cfg(feature = "parallel")]
+        let y: Vec<f64> = x
+            .par_iter()
+            .map(|sample| Self::predict_row(sample, w, support_vectors, b, &self.parameters.kernel))
+            .collect();
+        #[cfg(not(feature = "parallel"))]
         let y: Vec<f64> = x
             .iter()
             .map(|sample| Self::predict_row(sample, w, support_vectors, b, &self.parameters.kernel))
@@ -215,7 +230,6 @@ mod tests {
     #[test]
     fn test_predict_w_b() {
         let x = vec![vec![1.0, 1.0], vec![2.0, 2.0], vec![3.0, 3.0]];
-        let y: Vec<i32> = vec![-1, -1, 1];
         let support_vectors = vec![vec![1.0, 1.0], vec![2.0, 2.0]];
 
         let w = vec![1.0];

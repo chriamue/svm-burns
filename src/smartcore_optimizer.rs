@@ -377,6 +377,7 @@ impl SMO {
         // Precompute k1 and k2 values outside the loop
         let mut k1_values = Vec::new();
         let mut k2_values = Vec::new();
+
         for i in 0..self.sv.len() {
             let xj = &self.sv[i].x;
             k2_values.push(
